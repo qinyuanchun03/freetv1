@@ -1,0 +1,5 @@
+{
+  "name": "PHP CMS Local Player",
+  "description": "An application to parse and play video data from PHP CMS sites. Add fixed playback sources and browse your media content in a sleek, modern interface.",
+  "requestFramePermissions": []
+}
