@@ -1,7 +1,5 @@
-
-
 import React, { useState, useEffect } from 'react';
-import type { Source, Video, Player } from './types';
+import type { Source, Video, Player, Proxy } from './types';
 import { SourceManager } from './components/SourceManager';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -13,7 +11,7 @@ import { TvIcon, HomeIcon, FilmIcon, SparklesIcon, CubeIcon, SearchIcon } from '
 const predefinedSourcesList: Array<{ name: string; url: string; type: 'apple-cms' | 'm3u8' }> = [
   { name: "TV-爱坤资源", url: "https://ikunzyapi.com/api.php/provide/vod", type: 'apple-cms' },
   { name: "茅台资源", url: "https://caiji.maotaizy.cc/api.php/provide/vod/from/mtm3u8/at/josn/", type: 'apple-cms' },
-  { name: "电影天堂", url: "http://caiji.dyttzyapi.com/api.php/provide/vod", type: 'apple-cms' },
+  { name: "电影天堂", url: "https://caiji.dyttzyapi.com/api.php/provide/vod", type: 'apple-cms' },
 ];
 predefinedSourcesList.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans'));
 
@@ -30,6 +28,14 @@ const defaultPlayers: Player[] = [
     { id: 'dplayer', name: 'DPlayer (默认)', type: 'dplayer' },
     { id: 'ikun-parser', name: '爱坤解析', type: 'iframe', url: 'https://www.ikdmjx.com/?url=' },
     { id: 'xj-player', name: 'XJPlayer (测试)', type: 'iframe', url: 'https://update.xiaojizy.live/aplayer/player.html?autoplay=1&movurl=' },
+];
+
+const defaultProxies: Proxy[] = [
+    { id: 'netlify', name: 'Netlify 代理 (推荐)', url: '/api/proxy/' },
+    { id: 'none', name: '不使用代理', url: '' },
+    { id: 'cors-eu-org', name: 'cors.eu.org', url: 'https://cors.eu.org/' },
+    { id: 'corsproxy-io', name: 'corsproxy.io', url: 'https://corsproxy.io/?' },
+    { id: 'custom', name: '自定义代理', url: '' }, // URL is dynamic
 ];
 
 
@@ -97,6 +103,28 @@ const App: React.FC = () => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(() => {
       return localStorage.getItem('cms-player-selected-player') || 'dplayer';
   });
+  const [selectedProxyId, setSelectedProxyId] = useState<string>(() => {
+    const savedProxy = localStorage.getItem('cms-player-selected-proxy');
+    if (savedProxy) {
+        return savedProxy;
+    }
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    // Default to Netlify proxy when deployed, but use a public one for local dev where Netlify proxy isn't available.
+    return isLocal ? 'cors-eu-org' : 'netlify';
+  });
+  const [customProxyUrl, setCustomProxyUrl] = useState<string>(() => {
+      return localStorage.getItem('cms-player-custom-proxy-url') || '';
+  });
+
+  const getSelectedProxy = () => {
+    const proxy = defaultProxies.find(p => p.id === selectedProxyId);
+    if (proxy?.id === 'custom') {
+        return { ...proxy, url: customProxyUrl.trim() };
+    }
+    return proxy || defaultProxies[0];
+  };
+  const selectedProxy = getSelectedProxy();
+
 
   useEffect(() => {
     localStorage.setItem('cms-player-sources', JSON.stringify(sources));
@@ -105,6 +133,14 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('cms-player-selected-player', selectedPlayerId);
   }, [selectedPlayerId]);
+  
+  useEffect(() => {
+    localStorage.setItem('cms-player-selected-proxy', selectedProxyId);
+  }, [selectedProxyId]);
+  
+  useEffect(() => {
+    localStorage.setItem('cms-player-custom-proxy-url', customProxyUrl);
+  }, [customProxyUrl]);
 
 
   useEffect(() => {
@@ -118,7 +154,7 @@ const App: React.FC = () => {
     setSources(prev => prev.map(s => s.id === sourceId ? { ...s, status: 'testing' } : s));
     
     try {
-        await fetchVideos(source);
+        await fetchVideos(source, selectedProxy.url);
         setSources(prev => prev.map(s => s.id === sourceId ? { ...s, status: 'available' } : s));
     } catch (e) {
         setSources(prev => prev.map(s => s.id === sourceId ? { ...s, status: 'unavailable' } : s));
@@ -131,7 +167,7 @@ const App: React.FC = () => {
     const results = await Promise.all(
         sources.map(async source => {
             try {
-                await fetchVideos(source);
+                await fetchVideos(source, selectedProxy.url);
                 return { id: source.id, status: 'available' as const };
             } catch (e) {
                 return { id: source.id, status: 'unavailable' as const };
@@ -171,7 +207,7 @@ const App: React.FC = () => {
     setError(null);
     setVideos([]);
     
-    const promises = searchableSources.map(source => fetchVideos(source, query.trim()));
+    const promises = searchableSources.map(source => fetchVideos(source, selectedProxy.url, query.trim()));
     const results = await Promise.allSettled(promises);
     
     const successfulResults: Video[] = [];
@@ -211,7 +247,7 @@ const App: React.FC = () => {
 
     try {
       const categoryId = categoryMap[category];
-      const results = await fetchVideos(availableSource, undefined, categoryId ?? undefined);
+      const results = await fetchVideos(availableSource, selectedProxy.url, undefined, categoryId ?? undefined);
       setVideos(results);
     } catch (e) {
       const message = e instanceof Error ? e.message : '加载分类数据时发生未知错误。';
@@ -324,12 +360,17 @@ const App: React.FC = () => {
       <SourceManager 
         sources={sources}
         players={defaultPlayers}
+        proxies={defaultProxies}
         selectedPlayerId={selectedPlayerId}
+        selectedProxyId={selectedProxyId}
         predefinedSources={predefinedSourcesList}
         onAddSource={handleAddSource}
         onDeleteSource={handleDeleteSource}
         onSearch={handleSearch}
         onPlayerChange={setSelectedPlayerId}
+        onProxyChange={setSelectedProxyId}
+        customProxyUrl={customProxyUrl}
+        onSetCustomProxyUrl={setCustomProxyUrl}
         onTestSource={testSingleSource}
         onTestAllSources={testAllSources}
       />

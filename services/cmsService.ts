@@ -1,5 +1,3 @@
-
-
 import type { Video, Episode, Source } from '../types';
 
 const parseEpisodes = (playUrl: string): Episode[] => {
@@ -71,12 +69,14 @@ const parseM3U8 = (m3u8Content: string, source: Source, query?: string): Video[]
 };
 
 
-const fetchVideosFromM3U8 = async (source: Source, query?: string): Promise<Video[]> => {
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(source.url)}`;
+const fetchVideosFromM3U8 = async (source: Source, proxyUrl: string, query?: string): Promise<Video[]> => {
+    const targetUrl = source.url;
+    // 测试：强制直接访问，不使用代理
+    const finalUrl = targetUrl;
     try {
-        const response = await fetch(proxyUrl);
+        const response = await fetch(finalUrl);
         if (!response.ok) {
-            throw new Error(`网络响应错误: ${response.status}`);
+            throw new Error(`网络响应错误: ${response.status} ${response.statusText}`);
         }
         const m3u8Content = await response.text();
         if (m3u8Content.trim().startsWith('<')) {
@@ -85,11 +85,14 @@ const fetchVideosFromM3U8 = async (source: Source, query?: string): Promise<Vide
         return parseM3U8(m3u8Content, source, query);
     } catch (error) {
         console.error(`从 ${source.name} 获取或解析 M3U8 失败:`, error);
+        if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+            throw new Error(`无法从 ${source.name} 获取数据。这通常是由于网络问题、CORS 跨域限制或混合内容（在 HTTPS 页面请求 HTTP 资源）。\n\n请尝试在“设置”中切换或配置一个有效的 CORS 代理来解决此问题。`);
+        }
         throw new Error(`从 ${source.name} 获取 M3U8 数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
     }
 };
 
-const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryId?: string): Promise<Video[]> => {
+const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?: string, categoryId?: string): Promise<Video[]> => {
     const apiUrl = new URL(source.url);
     // Standard parameter for fetching video lists in Apple CMS v10.
     apiUrl.searchParams.append('ac', 'detail'); 
@@ -99,10 +102,12 @@ const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryI
       apiUrl.searchParams.append('t', categoryId);
     }
   
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl.toString())}`;
+    const targetUrl = apiUrl.toString();
+    // 测试：强制直接访问，不使用代理
+    const finalUrl = targetUrl;
   
     try {
-      const response = await fetch(proxyUrl);
+      const response = await fetch(finalUrl);
   
       if (!response.ok) {
         throw new Error(`网络响应错误: ${response.status} ${response.statusText}`);
@@ -140,20 +145,20 @@ const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryI
       return transformApiResponse(data.list, source);
   
     } catch (error) {
-      console.error(`从 ${source.name} 获取或解析视频失败:`, error);
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-          throw new Error('无法获取数据。这可能是网络问题或代理服务器已关闭。请检查您的网络连接。');
-      }
-      throw new Error(`从 ${source.name} 获取数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
+        console.error(`从 ${source.name} 获取或解析视频失败:`, error);
+        if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+            throw new Error(`无法从 ${source.name} 获取数据。这通常是由于网络问题、CORS 跨域限制或混合内容（在 HTTPS 页面请求 HTTP 资源）。\n\n请尝试在“设置”中切换或配置一个有效的 CORS 代理来解决此问题。`);
+        }
+        throw new Error(`从 ${source.name} 获取数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
     }
 };
 
 
-export const fetchVideos = async (source: Source, query?: string, categoryId?: string): Promise<Video[]> => {
+export const fetchVideos = async (source: Source, proxyUrl: string, query?: string, categoryId?: string): Promise<Video[]> => {
   if (source.type === 'm3u8') {
     // M3U8 sources don't support category browsing.
     if (categoryId) return [];
-    return fetchVideosFromM3U8(source, query);
+    return fetchVideosFromM3U8(source, proxyUrl, query);
   }
-  return fetchVideosFromAppleCMS(source, query, categoryId);
+  return fetchVideosFromAppleCMS(source, proxyUrl, query, categoryId);
 };

@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import type { Source, Player } from '../types';
+import type { Source, Player, Proxy } from '../types';
 // FIX: Import TvIcon to resolve reference error.
 import { PlusIcon, TrashIcon, CloseIcon, RefreshIcon, TvIcon } from './icons';
 
 interface SourceManagerProps {
   sources: Source[];
   players: Player[];
+  proxies: Proxy[];
   selectedPlayerId: string;
+  selectedProxyId: string;
   predefinedSources: Array<{ name: string; url: string; type: 'apple-cms' | 'm3u8' }>;
   onAddSource: (source: { name: string, url: string }) => void;
   onDeleteSource: (id: string) => void;
   onSearch: (query: string) => void;
   onPlayerChange: (id: string) => void;
+  onProxyChange: (id: string) => void;
+  customProxyUrl: string;
+  onSetCustomProxyUrl: (url: string) => void;
   onTestSource: (id: string) => void;
   onTestAllSources: () => void;
 }
@@ -19,15 +24,20 @@ interface SourceManagerProps {
 const SettingsModal: React.FC<{
   sources: Source[];
   players: Player[];
+  proxies: Proxy[];
   selectedPlayerId: string;
+  selectedProxyId: string;
   predefinedSources: Array<{ name: string; url: string; type: 'apple-cms' | 'm3u8' }>;
   onAddSource: (source: { name: string, url: string }) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
   onPlayerChange: (id: string) => void;
+  onProxyChange: (id: string) => void;
+  customProxyUrl: string;
+  onSetCustomProxyUrl: (url: string) => void;
   onTestSource: (id: string) => void;
   onTestAllSources: () => void;
-}> = ({ sources, players, selectedPlayerId, predefinedSources, onAddSource, onDelete, onClose, onPlayerChange, onTestSource, onTestAllSources }) => {
+}> = ({ sources, players, proxies, selectedPlayerId, selectedProxyId, customProxyUrl, predefinedSources, onAddSource, onDelete, onClose, onPlayerChange, onProxyChange, onSetCustomProxyUrl, onTestSource, onTestAllSources }) => {
     const [newSourceUrl, setNewSourceUrl] = useState('');
 
     const handleAddManualSource = () => {
@@ -164,19 +174,47 @@ const SettingsModal: React.FC<{
                   </div>
                 </div>
                 
-                <div className="pt-4 border-t border-border-color">
-                    <h3 className="text-lg font-semibold text-text-primary mb-2">播放器设置</h3>
-                    <p className="text-text-secondary mb-3 text-sm">选择用于播放视频的默认播放器。</p>
-                    <select
-                        value={selectedPlayerId}
-                        onChange={(e) => onPlayerChange(e.target.value)}
-                        className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                        aria-label="选择播放器"
-                    >
-                        {players.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
+                <div className="pt-4 border-t border-border-color space-y-4">
+                    <div>
+                        <h3 className="text-lg font-semibold text-text-primary mb-2">CORS 代理设置</h3>
+                        <p className="text-text-secondary mb-3 text-sm">如果无法加载资源，推荐使用 Netlify 代理来解决跨域问题。您也可以尝试切换其他代理。</p>
+                        <select
+                            value={selectedProxyId}
+                            onChange={(e) => onProxyChange(e.target.value)}
+                            className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                            aria-label="选择CORS代理"
+                        >
+                            {proxies.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                        {selectedProxyId === 'custom' && (
+                            <div className="mt-2">
+                                <input
+                                    type="text"
+                                    value={customProxyUrl}
+                                    onChange={(e) => onSetCustomProxyUrl(e.target.value)}
+                                    placeholder="https://my-proxy.com/?"
+                                    className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                                />
+                                <p className="text-xs text-text-secondary mt-1">请输入完整的代理 URL。一个可用的代理可以解决因网络限制导致的资源加载失败问题。</p>
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-semibold text-text-primary mb-2">播放器设置</h3>
+                        <p className="text-text-secondary mb-3 text-sm">选择用于播放视频的默认播放器。</p>
+                        <select
+                            value={selectedPlayerId}
+                            onChange={(e) => onPlayerChange(e.target.value)}
+                            className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                            aria-label="选择播放器"
+                        >
+                            {players.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
             </div>
         </div>
@@ -189,12 +227,17 @@ const SettingsModal: React.FC<{
 export const SourceManager: React.FC<SourceManagerProps> = ({
   sources,
   players,
+  proxies,
   selectedPlayerId,
+  selectedProxyId,
   predefinedSources,
   onAddSource,
   onDeleteSource,
   onSearch,
   onPlayerChange,
+  onProxyChange,
+  customProxyUrl,
+  onSetCustomProxyUrl,
   onTestSource,
   onTestAllSources,
 }) => {
@@ -212,12 +255,17 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
       {isSettingsOpen && <SettingsModal 
         sources={sources} 
         players={players}
+        proxies={proxies}
         selectedPlayerId={selectedPlayerId}
+        selectedProxyId={selectedProxyId}
         predefinedSources={predefinedSources}
         onAddSource={onAddSource} 
         onDelete={onDeleteSource} 
         onClose={() => setIsSettingsOpen(false)} 
         onPlayerChange={onPlayerChange}
+        onProxyChange={onProxyChange}
+        customProxyUrl={customProxyUrl}
+        onSetCustomProxyUrl={onSetCustomProxyUrl}
         onTestSource={onTestSource}
         onTestAllSources={onTestAllSources}
       />}
@@ -241,7 +289,7 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
             className="bg-primary text-white p-2 rounded-r-full hover:bg-primary-hover transition-colors"
             aria-label="搜索"
             >
-             <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+             <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0_0 24 24" strokeWidth={1.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
             </svg>
           </button>
