@@ -32,10 +32,10 @@ const defaultPlayers: Player[] = [
 
 const defaultProxies: Proxy[] = [
     { id: 'netlify', name: 'Netlify 代理 (推荐)', url: '/api/proxy/' },
-    { id: 'none', name: '不使用代理', url: '' },
-    { id: 'cors-eu-org', name: 'cors.eu.org', url: 'https://cors.eu.org/' },
+    { id: 'cors-eu-org', name: 'cors.eu.org (推荐)', url: 'https://cors.eu.org/' },
     { id: 'corsproxy-io', name: 'corsproxy.io', url: 'https://corsproxy.io/?' },
-    { id: 'custom', name: '自定义代理', url: '' }, // URL is dynamic
+    { id: 'none', name: '不使用代理 (若直连失败)', url: '' },
+    { id: 'custom', name: '自定义代理', url: '' },
 ];
 
 
@@ -105,12 +105,8 @@ const App: React.FC = () => {
   });
   const [selectedProxyId, setSelectedProxyId] = useState<string>(() => {
     const savedProxy = localStorage.getItem('cms-player-selected-proxy');
-    if (savedProxy) {
-        return savedProxy;
-    }
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    // Default to Netlify proxy when deployed, but use a public one for local dev where Netlify proxy isn't available.
-    return isLocal ? 'cors-eu-org' : 'netlify';
+    // Default to a working proxy for a better first-time experience.
+    return savedProxy || 'cors-eu-org';
   });
   const [customProxyUrl, setCustomProxyUrl] = useState<string>(() => {
       return localStorage.getItem('cms-player-custom-proxy-url') || '';
@@ -121,7 +117,7 @@ const App: React.FC = () => {
     if (proxy?.id === 'custom') {
         return { ...proxy, url: customProxyUrl.trim() };
     }
-    return proxy || defaultProxies[0];
+    return proxy || defaultProxies.find(p => p.id === 'none');
   };
   const selectedProxy = getSelectedProxy();
 

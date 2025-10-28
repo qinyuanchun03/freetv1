@@ -32,7 +32,6 @@ const parseM3U8 = (m3u8Content: string, source: Source, query?: string): Video[]
     const videos: Video[] = [];
     let currentVideoInfo: Partial<Video> & { episodes?: Episode[] } = {};
     const fallbackThumbnail = 'https://via.placeholder.com/300x450.png?text=Live';
-    // FIX: Define `lines` by splitting the m3u8Content string into an array of lines before iterating over it.
     const lines = m3u8Content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -68,11 +67,22 @@ const parseM3U8 = (m3u8Content: string, source: Source, query?: string): Video[]
     return videos;
 };
 
+const constructProxyUrl = (proxyUrl: string, targetUrl: string): string => {
+    if (!proxyUrl || proxyUrl.trim() === '') {
+        return targetUrl;
+    }
+    // Query-based proxy (e.g., https://corsproxy.io/?)
+    if (proxyUrl.includes('?')) {
+        return `${proxyUrl}${encodeURIComponent(targetUrl)}`;
+    }
+    // Path-based proxy (e.g., /api/proxy/ or https://cors.eu.org/)
+    return `${proxyUrl}${targetUrl}`;
+};
+
 
 const fetchVideosFromM3U8 = async (source: Source, proxyUrl: string, query?: string): Promise<Video[]> => {
     const targetUrl = source.url;
-    // 测试：强制直接访问，不使用代理
-    const finalUrl = targetUrl;
+    const finalUrl = constructProxyUrl(proxyUrl, targetUrl);
     try {
         const response = await fetch(finalUrl);
         if (!response.ok) {
@@ -103,8 +113,7 @@ const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?:
     }
   
     const targetUrl = apiUrl.toString();
-    // 测试：强制直接访问，不使用代理
-    const finalUrl = targetUrl;
+    const finalUrl = constructProxyUrl(proxyUrl, targetUrl);
   
     try {
       const response = await fetch(finalUrl);
