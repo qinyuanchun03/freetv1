@@ -112,12 +112,14 @@ const App: React.FC = () => {
       return localStorage.getItem('cms-player-custom-proxy-url') || '';
   });
 
-  const getSelectedProxy = () => {
+  const getSelectedProxy = (): Proxy => {
     const proxy = defaultProxies.find(p => p.id === selectedProxyId);
     if (proxy?.id === 'custom') {
         return { ...proxy, url: customProxyUrl.trim() };
     }
-    return proxy || defaultProxies.find(p => p.id === 'none');
+    // The original logic could theoretically return `undefined`, causing a build error.
+    // This adds a hardcoded fallback to guarantee a `Proxy` object is always returned.
+    return proxy || defaultProxies.find(p => p.id === 'none') || { id: 'none', name: '不使用代理 (备用)', url: '' };
   };
   const selectedProxy = getSelectedProxy();
 
