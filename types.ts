@@ -4,6 +4,7 @@ export interface Source {
   url: string;
   type: 'apple-cms' | 'm3u8';
   status?: 'unknown' | 'testing' | 'available' | 'unavailable';
+  latency?: number;
 }
 
 export interface Episode {
@@ -12,7 +13,7 @@ export interface Episode {
 }
 
 export interface Video {
-  id: number | string;
+  id: string;
   title: string;
   description: string;
   thumbnailUrl: string;
@@ -28,10 +29,4 @@ export interface Player {
   name: string;
   type: 'dplayer' | 'iframe';
   url?: string; // Only for iframe type
-}
-
-export interface Proxy {
-  id: string;
-  name: string;
-  url: string;
 }

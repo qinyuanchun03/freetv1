@@ -1,43 +1,37 @@
 import React, { useState } from 'react';
-import type { Source, Player, Proxy } from '../types';
+import type { Source, Player } from '../types';
 // FIX: Import TvIcon to resolve reference error.
 import { PlusIcon, TrashIcon, CloseIcon, RefreshIcon, TvIcon } from './icons';
 
 interface SourceManagerProps {
   sources: Source[];
   players: Player[];
-  proxies: Proxy[];
   selectedPlayerId: string;
-  selectedProxyId: string;
   predefinedSources: Array<{ name: string; url: string; type: 'apple-cms' | 'm3u8' }>;
+  corsProxyUrl: string;
   onAddSource: (source: { name: string, url: string }) => void;
   onDeleteSource: (id: string) => void;
   onSearch: (query: string) => void;
   onPlayerChange: (id: string) => void;
-  onProxyChange: (id: string) => void;
-  customProxyUrl: string;
-  onSetCustomProxyUrl: (url: string) => void;
   onTestSource: (id: string) => void;
   onTestAllSources: () => void;
+  onCorsProxyUrlChange: (url: string) => void;
 }
 
 const SettingsModal: React.FC<{
   sources: Source[];
   players: Player[];
-  proxies: Proxy[];
   selectedPlayerId: string;
-  selectedProxyId: string;
   predefinedSources: Array<{ name: string; url: string; type: 'apple-cms' | 'm3u8' }>;
+  corsProxyUrl: string;
   onAddSource: (source: { name: string, url: string }) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
   onPlayerChange: (id: string) => void;
-  onProxyChange: (id: string) => void;
-  customProxyUrl: string;
-  onSetCustomProxyUrl: (url: string) => void;
   onTestSource: (id: string) => void;
   onTestAllSources: () => void;
-}> = ({ sources, players, proxies, selectedPlayerId, selectedProxyId, customProxyUrl, predefinedSources, onAddSource, onDelete, onClose, onPlayerChange, onProxyChange, onSetCustomProxyUrl, onTestSource, onTestAllSources }) => {
+  onCorsProxyUrlChange: (url: string) => void;
+}> = ({ sources, players, selectedPlayerId, predefinedSources, corsProxyUrl, onAddSource, onDelete, onClose, onPlayerChange, onTestSource, onTestAllSources, onCorsProxyUrlChange }) => {
     const [newSourceUrl, setNewSourceUrl] = useState('');
 
     const handleAddManualSource = () => {
@@ -94,6 +88,9 @@ const SettingsModal: React.FC<{
                                     <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusClasses[source.status || 'unknown']}`}></span>
                                     <div className="font-medium text-text-primary truncate flex items-center">
                                       <p className="truncate">{source.name}</p>
+                                      {source.latency !== undefined && source.status === 'available' && (
+                                        <span className="text-xs text-text-secondary ml-2 whitespace-nowrap">({source.latency}ms)</span>
+                                      )}
                                       <span className={`text-xs font-semibold ml-2 px-2 py-0.5 rounded-full ${source.type === 'm3u8' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
                                           {source.type === 'm3u8' ? 'M3U8' : 'CMS'}
                                       </span>
@@ -174,33 +171,7 @@ const SettingsModal: React.FC<{
                   </div>
                 </div>
                 
-                <div className="pt-4 border-t border-border-color space-y-4">
-                    <div>
-                        <h3 className="text-lg font-semibold text-text-primary mb-2">CORS 代理设置</h3>
-                        <p className="text-text-secondary mb-3 text-sm">如果无法加载资源，推荐使用 Netlify 代理来解决跨域问题。您也可以尝试切换其他代理。</p>
-                        <select
-                            value={selectedProxyId}
-                            onChange={(e) => onProxyChange(e.target.value)}
-                            className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                            aria-label="选择CORS代理"
-                        >
-                            {proxies.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                        {selectedProxyId === 'custom' && (
-                            <div className="mt-2">
-                                <input
-                                    type="text"
-                                    value={customProxyUrl}
-                                    onChange={(e) => onSetCustomProxyUrl(e.target.value)}
-                                    placeholder="https://my-proxy.com/?"
-                                    className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                                />
-                                <p className="text-xs text-text-secondary mt-1">请输入完整的代理 URL。一个可用的代理可以解决因网络限制导致的资源加载失败问题。</p>
-                            </div>
-                        )}
-                    </div>
+                <div className="pt-4 border-t border-border-color">
                     <div>
                         <h3 className="text-lg font-semibold text-text-primary mb-2">播放器设置</h3>
                         <p className="text-text-secondary mb-3 text-sm">选择用于播放视频的默认播放器。</p>
@@ -215,31 +186,37 @@ const SettingsModal: React.FC<{
                             ))}
                         </select>
                     </div>
+                    <div className="mt-4">
+                        <h3 className="text-lg font-semibold text-text-primary mb-2">代理设置</h3>
+                        <p className="text-text-secondary mb-3 text-sm">自定义用于跨域请求的代理服务器 URL。</p>
+                        <input
+                          type="text"
+                          value={corsProxyUrl}
+                          onChange={(e) => onCorsProxyUrlChange(e.target.value)}
+                          placeholder="https://my-proxy.com/?url="
+                          className="w-full bg-background border border-border-color rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                          aria-label="CORS 代理 URL"
+                        />
+                    </div>
                 </div>
             </div>
         </div>
     )
 }
 
-// Omitted the SourceManager export component for brevity, as it only passes props down to SettingsModal.
-// The structure remains the same. The real changes are in SettingsModal and App.tsx.
-
 export const SourceManager: React.FC<SourceManagerProps> = ({
   sources,
   players,
-  proxies,
   selectedPlayerId,
-  selectedProxyId,
   predefinedSources,
+  corsProxyUrl,
   onAddSource,
   onDeleteSource,
   onSearch,
   onPlayerChange,
-  onProxyChange,
-  customProxyUrl,
-  onSetCustomProxyUrl,
   onTestSource,
   onTestAllSources,
+  onCorsProxyUrlChange,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -255,19 +232,16 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
       {isSettingsOpen && <SettingsModal 
         sources={sources} 
         players={players}
-        proxies={proxies}
         selectedPlayerId={selectedPlayerId}
-        selectedProxyId={selectedProxyId}
         predefinedSources={predefinedSources}
+        corsProxyUrl={corsProxyUrl}
         onAddSource={onAddSource} 
         onDelete={onDeleteSource} 
         onClose={() => setIsSettingsOpen(false)} 
         onPlayerChange={onPlayerChange}
-        onProxyChange={onProxyChange}
-        customProxyUrl={customProxyUrl}
-        onSetCustomProxyUrl={onSetCustomProxyUrl}
         onTestSource={onTestSource}
         onTestAllSources={onTestAllSources}
+        onCorsProxyUrlChange={onCorsProxyUrlChange}
       />}
       <div className="container mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center space-x-2">
@@ -289,7 +263,7 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
             className="bg-primary text-white p-2 rounded-r-full hover:bg-primary-hover transition-colors"
             aria-label="搜索"
             >
-             <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0_0 24 24" strokeWidth={1.5} stroke="currentColor">
+             <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
             </svg>
           </button>

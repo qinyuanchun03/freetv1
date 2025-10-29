@@ -1,22 +1,89 @@
 import type { Video, Episode, Source } from '../types';
 
+// 从一个写死的常量变为一个可配置的变量，以支持用户自定义代理。
+let proxyConfig = { 
+    prefix: 'https://cross.250221.xyz/?url=', 
+    encode: true 
+};
+
+/**
+ * 设置用于所有后续请求的CORS代理URL。
+ * @param {string} url - 新的代理服务器URL。
+ */
+export const setProxyUrl = (url: string) => {
+    if (url && typeof url === 'string' && url.trim().length > 0) {
+        proxyConfig.prefix = url;
+    }
+};
+
+const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 小时
+
+// --- 缓存工具 ---
+const getCache = <T>(key: string): T | null => {
+    const cachedItem = localStorage.getItem(key);
+    if (!cachedItem) return null;
+
+    try {
+        const { data, expiry } = JSON.parse(cachedItem);
+        if (Date.now() > expiry) {
+            localStorage.removeItem(key);
+            return null;
+        }
+        return data as T;
+    } catch (e) {
+        localStorage.removeItem(key);
+        return null;
+    }
+};
+
+const setCache = (key: string, data: any) => {
+    const item = {
+        data,
+        expiry: Date.now() + CACHE_DURATION,
+    };
+    try {
+      localStorage.setItem(key, JSON.stringify(item));
+    } catch (e) {
+      console.error("写入localStorage失败:", e);
+    }
+};
+
+const fetchWithProxy = async (url: string): Promise<Response> => {
+    const targetUrl = proxyConfig.encode ? encodeURIComponent(url) : url;
+    const proxyUrl = `${proxyConfig.prefix}${targetUrl}`;
+
+    try {
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+            throw new Error(`代理响应错误: ${response.status} ${response.statusText}`);
+        }
+        return response;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '未知网络错误';
+        console.error(`代理请求失败，URL: ${url}`, errorMessage);
+        // 向上抛出错误，由调用方添加更多上下文信息
+        throw new Error(`代理请求失败: ${errorMessage}`);
+    }
+};
+
+
 const parseEpisodes = (playUrl: string): Episode[] => {
     if (!playUrl) return [];
     try {
-        // Example format: "Episode 1$url1#Episode 2$url2"
+        // 示例格式: "第1集$url1#第2集$url2"
         return playUrl.split('#').map(episodeStr => {
             const parts = episodeStr.split('$');
             return { name: parts[0] || '视频', url: parts[1] || '' };
         }).filter(ep => ep.url);
     } catch (e) {
-        console.error("Failed to parse episodes", e);
+        console.error("解析剧集失败", e);
         return [];
     }
 }
 
 const transformApiResponse = (apiData: any[], source: Source): Video[] => {
     return apiData.map(item => ({
-        id: item.vod_id,
+        id: String(item.vod_id),
         title: item.vod_name,
         description: item.vod_blurb || '暂无简介。',
         thumbnailUrl: item.vod_pic,
@@ -67,44 +134,40 @@ const parseM3U8 = (m3u8Content: string, source: Source, query?: string): Video[]
     return videos;
 };
 
-const constructProxyUrl = (proxyUrl: string, targetUrl: string): string => {
-    if (!proxyUrl || proxyUrl.trim() === '') {
-        return targetUrl;
-    }
-    // Query-based proxy (e.g., https://corsproxy.io/?)
-    if (proxyUrl.includes('?')) {
-        return `${proxyUrl}${encodeURIComponent(targetUrl)}`;
-    }
-    // Path-based proxy (e.g., /api/proxy/ or https://cors.eu.org/)
-    return `${proxyUrl}${targetUrl}`;
-};
 
+const fetchVideosFromM3U8 = async (source: Source, query?: string): Promise<Video[]> => {
+    const cacheKey = `cms-cache-${source.url}-${query || ''}`;
+    const cachedData = getCache<Video[]>(cacheKey);
+    if (cachedData) {
+        return cachedData;
+    }
 
-const fetchVideosFromM3U8 = async (source: Source, proxyUrl: string, query?: string): Promise<Video[]> => {
-    const targetUrl = source.url;
-    const finalUrl = constructProxyUrl(proxyUrl, targetUrl);
     try {
-        const response = await fetch(finalUrl);
+        const response = await fetchWithProxy(source.url);
         if (!response.ok) {
-            throw new Error(`网络响应错误: ${response.status} ${response.statusText}`);
+            throw new Error(`网络响应错误: ${response.status}`);
         }
         const m3u8Content = await response.text();
         if (m3u8Content.trim().startsWith('<')) {
             throw new Error('API返回了意外的格式 (XML/HTML)，而不是有效的 M3U8 播放列表。');
         }
-        return parseM3U8(m3u8Content, source, query);
+        const parsedData = parseM3U8(m3u8Content, source, query);
+        setCache(cacheKey, parsedData);
+        return parsedData;
     } catch (error) {
         console.error(`从 ${source.name} 获取或解析 M3U8 失败:`, error);
-        if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
-            throw new Error(`无法从 ${source.name} 获取数据。这通常是由于网络问题、CORS 跨域限制或混合内容（在 HTTPS 页面请求 HTTP 资源）。\n\n请尝试在“设置”中切换或配置一个有效的 CORS 代理来解决此问题。`);
-        }
         throw new Error(`从 ${source.name} 获取 M3U8 数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
     }
 };
 
-const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?: string, categoryId?: string): Promise<Video[]> => {
+const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryId?: string): Promise<Video[]> => {
+    const cacheKey = `cms-cache-${source.url}-${query || ''}-${categoryId || ''}`;
+    const cachedData = getCache<Video[]>(cacheKey);
+    if (cachedData) {
+        return cachedData;
+    }
+
     const apiUrl = new URL(source.url);
-    // Standard parameter for fetching video lists in Apple CMS v10.
     apiUrl.searchParams.append('ac', 'detail'); 
     if (query) {
       apiUrl.searchParams.append('wd', query);
@@ -112,11 +175,8 @@ const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?:
       apiUrl.searchParams.append('t', categoryId);
     }
   
-    const targetUrl = apiUrl.toString();
-    const finalUrl = constructProxyUrl(proxyUrl, targetUrl);
-  
     try {
-      const response = await fetch(finalUrl);
+      const response = await fetchWithProxy(apiUrl.toString());
   
       if (!response.ok) {
         throw new Error(`网络响应错误: ${response.status} ${response.statusText}`);
@@ -129,7 +189,7 @@ const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?:
         data = JSON.parse(responseText);
       } catch (parseError) {
         if (query && (responseText.includes('暂不支持搜索') || responseText.includes('禁止搜索'))) {
-          console.warn(`Source ${source.name} does not support search, returning empty results.`);
+          console.warn(`源 ${source.name} 不支持搜索，返回空结果。`);
           return [];
         }
         if (responseText.trim().startsWith('<')) {
@@ -150,24 +210,25 @@ const fetchVideosFromAppleCMS = async (source: Source, proxyUrl: string, query?:
           if (data.total === 0) return [];
           throw new Error('无效的API响应格式：缺少 "list" 属性或该属性不是一个数组。');
       }
-  
-      return transformApiResponse(data.list, source);
+      
+      const transformedData = transformApiResponse(data.list, source);
+      setCache(cacheKey, transformedData);
+      return transformedData;
   
     } catch (error) {
-        console.error(`从 ${source.name} 获取或解析视频失败:`, error);
-        if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
-            throw new Error(`无法从 ${source.name} 获取数据。这通常是由于网络问题、CORS 跨域限制或混合内容（在 HTTPS 页面请求 HTTP 资源）。\n\n请尝试在“设置”中切换或配置一个有效的 CORS 代理来解决此问题。`);
-        }
-        throw new Error(`从 ${source.name} 获取数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
+      console.error(`从 ${source.name} 获取或解析视频失败:`, error);
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+          throw new Error('无法获取数据。这可能是网络问题或代理服务器已关闭。请检查您的网络连接。');
+      }
+      throw new Error(`从 ${source.name} 获取数据失败。 (${error instanceof Error ? error.message : '未知错误'})`);
     }
 };
 
 
-export const fetchVideos = async (source: Source, proxyUrl: string, query?: string, categoryId?: string): Promise<Video[]> => {
+export const fetchVideos = async (source: Source, query?: string, categoryId?: string): Promise<Video[]> => {
   if (source.type === 'm3u8') {
-    // M3U8 sources don't support category browsing.
     if (categoryId) return [];
-    return fetchVideosFromM3U8(source, proxyUrl, query);
+    return fetchVideosFromM3U8(source, query);
   }
-  return fetchVideosFromAppleCMS(source, proxyUrl, query, categoryId);
+  return fetchVideosFromAppleCMS(source, query, categoryId);
 };
