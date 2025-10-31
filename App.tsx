@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import type { Source, Video, Player } from './types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import type { Source, Video, Player, HistoryEntry, Episode } from './types';
 import { SourceManager } from './components/SourceManager';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoPlayer } from './components/VideoPlayer';
+import { HistoryGrid } from './components/HistoryGrid';
 import { fetchVideos, setProxyUrl } from './services/cmsService';
-import { TvIcon, HomeIcon, FilmIcon, SparklesIcon, CubeIcon, SearchIcon } from './components/icons';
+import { SearchIcon } from './components/icons';
 
 // 一个经过大幅扩充和精心策划的预定义源列表。
 // 移除了重复项，并清理了名称以提供更好的用户体验。
@@ -30,49 +31,13 @@ const predefinedSourcesList: Array<{ name: string; url: string; type: 'apple-cms
 ];
 predefinedSourcesList.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans'));
 
-
-const categoryMap: Record<string, string | null> = {
-  '首页': null,
-  '电影': '1',
-  '剧集': '2',
-  '综艺': '3',
-  '动漫': '4',
-};
-
 const defaultPlayers: Player[] = [
-    { id: 'dplayer', name: 'DPlayer (默认)', type: 'dplayer' },
+    { id: 'dplayer', name: '内置播放器', type: 'dplayer' },
     { id: 'ikun-parser', name: '爱坤解析', type: 'iframe', url: 'https://www.ikdmjx.com/?url=' },
-    { id: 'xj-player', name: 'XJPlayer (测试)', type: 'iframe', url: 'https://update.xiaojizy.live/aplayer/player.html?autoplay=1&movurl=' },
+    { id: 'playerjy-parser', name: 'PlayerJY 解析', type: 'iframe', url: 'https://jx.playerjy.com/?url=' },
 ];
 
-
-const BottomNavBar: React.FC<{
-    activeCategory: string;
-    onSelectCategory: (category: string) => void;
-}> = ({ activeCategory, onSelectCategory }) => {
-    const navItems = [
-        { icon: HomeIcon, label: '首页' },
-        { icon: FilmIcon, label: '电影' },
-        { icon: TvIcon, label: '剧集' },
-        { icon: SparklesIcon, label: '动漫' },
-        { icon: CubeIcon, label: '综艺' },
-    ];
-
-    return (
-        <nav className="fixed bottom-0 left-0 right-0 bg-surface shadow-[0_-2px_10px_rgba(0,0,0,0.05)] flex justify-around items-center h-16 md:hidden z-40">
-            {navItems.map((item) => (
-                <button 
-                    key={item.label}
-                    onClick={() => onSelectCategory(item.label)}
-                    className={`flex flex-col items-center justify-center space-y-1 w-full h-full transition-colors ${activeCategory === item.label ? 'text-primary' : 'text-text-secondary'}`}
-                >
-                    <item.icon className="w-6 h-6" />
-                    <span className="text-xs font-medium">{item.label}</span>
-                </button>
-            ))}
-        </nav>
-    );
-};
+const MAX_HISTORY_ITEMS = 50;
 
 const App: React.FC = () => {
   const [sources, setSources] = useState<Source[]>(() => {
@@ -100,16 +65,19 @@ const App: React.FC = () => {
   
   const [videos, setVideos] = useState<Video[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
-  const [alternativeVideos, setAlternativeVideos] = useState<Video[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeCategory, setActiveCategory] = useState<string>('首页');
+  const [currentView, setCurrentView] = useState<'home' | 'search'>('home');
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(() => {
       return localStorage.getItem('cms-player-selected-player') || 'dplayer';
   });
   const [corsProxyUrl, setCorsProxyUrl] = useState<string>(() => {
     return localStorage.getItem('cms-player-proxy-url') || 'https://cross.250221.xyz/?url=';
+  });
+  const [viewingHistory, setViewingHistory] = useState<HistoryEntry[]>(() => {
+    const savedHistory = localStorage.getItem('cms-player-viewing-history');
+    return savedHistory ? JSON.parse(savedHistory) : [];
   });
 
 
@@ -127,12 +95,12 @@ const App: React.FC = () => {
   }, [corsProxyUrl]);
   
   useEffect(() => {
-    if (selectedVideo) {
-        const alternatives = videos.filter(v => v.title === selectedVideo.title && v.id !== selectedVideo.id);
-        setAlternativeVideos(alternatives);
-    } else {
-        setAlternativeVideos([]);
-    }
+    localStorage.setItem('cms-player-viewing-history', JSON.stringify(viewingHistory));
+  }, [viewingHistory]);
+
+  const alternativeVideos = useMemo(() => {
+    if (!selectedVideo) return [];
+    return videos.filter(v => v.title === selectedVideo.title && v.sourceId !== selectedVideo.sourceId);
   }, [selectedVideo, videos]);
 
   const testSingleSource = async (sourceId: string) => {
@@ -168,8 +136,6 @@ const App: React.FC = () => {
         })
     );
     
-    // FIX: 为Map构造函数显式提供泛型类型参数。
-    // 这有助于TypeScript正确推断值的类型，否则在涉及Promise.all的复杂场景中可能会解析为'unknown'。
     const resultMap = new Map<string, { status: 'available' | 'unavailable'; latency: number | undefined }>(results.map(r => [r.id, { status: r.status, latency: r.latency }]));
 
     setSources(prev => prev.map(s => ({
@@ -180,17 +146,19 @@ const App: React.FC = () => {
   };
 
   const handleSearch = useCallback(async (query: string, isBackgroundLoad = false) => {
+    setCurrentView('search');
     setSearchQuery(query);
-    setActiveCategory(''); 
     setSelectedVideo(null);
 
     if (!isBackgroundLoad) {
         try {
-            const params = new URLSearchParams();
-            if (query.trim()) {
-                params.set('q', query);
+            if (window.location.protocol.startsWith('http')) {
+                const params = new URLSearchParams();
+                if (query.trim()) {
+                    params.set('q', query);
+                }
+                window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
             }
-            window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
         } catch (e) {
             console.warn("无法更新URL。History API可能受到限制。", e);
         }
@@ -237,58 +205,35 @@ const App: React.FC = () => {
     setIsLoading(false);
   }, [sources]);
   
-  const handleCategorySelect = useCallback(async (category: string, isBackgroundLoad = false) => {
-    setActiveCategory(category);
-    setSearchQuery('');
+  const handleGoHome = () => {
     setSelectedVideo(null);
-    
-    if (!isBackgroundLoad) {
-        try {
-            const params = new URLSearchParams();
-            params.set('c', category);
-            window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
-        } catch (e) {
-            console.warn("无法更新URL。History API可能受到限制。", e);
-        }
-    }
-    
-    setIsLoading(true);
-    setError(null);
+    setCurrentView('home');
+    setSearchQuery('');
     setVideos([]);
-
-    const availableSource = sources.find(s => s.type === 'apple-cms' && (s.status === 'available' || s.status === 'unknown')) || sources.find(s => s.type === 'apple-cms');
-
-    if (!availableSource) {
-      setError('没有可用的 CMS 源来加载分类内容。直播源不支持分类浏览。');
-      setIsLoading(false);
-      return;
-    }
-
+    setError(null);
     try {
-      const categoryId = categoryMap[category];
-      const results = await fetchVideos(availableSource, undefined, categoryId ?? undefined);
-      setVideos(results);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : '加载分类数据时发生未知错误。';
-      setError(`从 ${availableSource.name} 加载 "${category}" 分类失败: ${message}`);
-    } finally {
-      setIsLoading(false);
+        if (window.location.protocol.startsWith('http')) {
+            const params = new URLSearchParams(window.location.search);
+            params.delete('q');
+            params.delete('videoId');
+            params.delete('sourceId');
+            window.history.pushState({}, '', `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`);
+        }
+    } catch(e) {
+        console.warn("无法更新URL。History API可能受到限制。", e);
     }
-  }, [sources]);
-  
+  };
+
   useEffect(() => {
-    // 在组件首次加载时，立即用存储的或默认的URL配置网络服务。
     setProxyUrl(corsProxyUrl);
     
     const params = new URLSearchParams(window.location.search);
     const videoId = params.get('videoId');
     const sourceId = params.get('sourceId');
     const query = params.get('q');
-    const category = params.get('c');
 
     const restoreContent = async () => {
         if (query) await handleSearch(query, true);
-        else if(category) await handleCategorySelect(category, true);
     };
 
     if (videoId && sourceId) {
@@ -306,13 +251,10 @@ const App: React.FC = () => {
     
     if (query) {
         handleSearch(query, false);
-    } else if (category) {
-        handleCategorySelect(category, false);
     } else {
-        handleCategorySelect('首页', false);
+        setCurrentView('home');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleCategorySelect, handleSearch]);
+  }, [corsProxyUrl, handleSearch]);
 
   const handleAddSource = (sourceToAdd: { name: string, url: string }) => {
     if (sources.some(s => s.url === sourceToAdd.url)) {
@@ -341,42 +283,60 @@ const App: React.FC = () => {
   };
   
   const handleSelectVideo = (video: Video) => {
-    // 检查在状态更新前是否已有视频被选中。
-    // 如果是，则这是一个源切换，而不是从网格中初次选择。
-    const isSourceSwitch = !!selectedVideo;
-
     setSelectedVideo(video);
     sessionStorage.setItem('cms-player-selected-video', JSON.stringify(video));
     try {
-      const params = new URLSearchParams(window.location.search);
-      params.set('videoId', String(video.id));
-      params.set('sourceId', video.sourceId);
-      window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+        if (window.location.protocol.startsWith('http')) {
+            const params = new URLSearchParams(window.location.search);
+            params.set('videoId', String(video.id));
+            params.set('sourceId', video.sourceId);
+            window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+        }
     } catch (e) {
       console.warn("无法更新URL。History API可能受到限制。", e);
     }
-
-    // 仅当用户从视频网格中选择一个新视频时才滚动到顶部。
-    // 在切换源时不滚动，以避免不必要的页面跳动。
-    if (!isSourceSwitch) {
-      window.scrollTo(0, 0);
-    }
+    window.scrollTo(0, 0);
   };
 
   const handleBackToGrid = () => {
     setSelectedVideo(null);
     sessionStorage.removeItem('cms-player-selected-video');
     try {
-        const params = new URLSearchParams(window.location.search);
-        params.delete('videoId');
-        params.delete('sourceId');
-        window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+        if (window.location.protocol.startsWith('http')) {
+            const params = new URLSearchParams(window.location.search);
+            params.delete('videoId');
+            params.delete('sourceId');
+            window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+        }
     } catch (e) {
         console.warn("无法更新URL。History API可能受到限制。", e);
     }
   };
 
-  const groupVideosBySource = (videos: Video[]): Record<string, Video[]> => {
+  const handleEpisodePlay = useCallback((video: Video, episode: Episode) => {
+    setViewingHistory(prevHistory => {
+      const newEntry: HistoryEntry = {
+        video: video,
+        episodeName: episode.name,
+        lastWatched: Date.now(),
+      };
+
+      const filteredHistory = prevHistory.filter(
+        entry => !(entry.video.id === video.id && entry.video.sourceId === video.sourceId)
+      );
+
+      const updatedHistory = [newEntry, ...filteredHistory];
+      return updatedHistory.slice(0, MAX_HISTORY_ITEMS);
+    });
+  }, []);
+
+  const handleClearHistory = () => {
+    if (window.confirm('您确定要清空所有观看记录吗？此操作无法撤销。')) {
+      setViewingHistory([]);
+    }
+  };
+
+  const groupedVideos = useMemo(() => {
     return videos.reduce((acc, video) => {
       const sourceName = video.sourceName;
       if (!acc[sourceName]) {
@@ -385,79 +345,106 @@ const App: React.FC = () => {
       acc[sourceName].push(video);
       return acc;
     }, {} as Record<string, Video[]>);
-  };
+  }, [videos]);
 
-  const renderContent = () => {
-    if (selectedVideo) {
-      const selectedPlayer = defaultPlayers.find(p => p.id === selectedPlayerId) || defaultPlayers[0];
-      return <VideoPlayer 
-        video={selectedVideo} 
-        player={selectedPlayer}
-        onBack={handleBackToGrid}
-        relatedVideos={videos.filter(v => v.id !== selectedVideo.id)}
-        alternativeVideos={alternativeVideos}
-        onSelectVideo={handleSelectVideo}
-        />;
+  const selectedPlayer = useMemo(() => {
+    return defaultPlayers.find(p => p.id === selectedPlayerId) || defaultPlayers[0];
+  }, [selectedPlayerId]);
+  
+  const relatedVideos = useMemo(() => {
+    if (!selectedVideo) return [];
+    return videos.filter(v => v.title === selectedVideo.title && v.id !== selectedVideo.id);
+  }, [selectedVideo, videos]);
+
+
+  const renderHomeAndSearch = () => {
+    if (currentView === 'home') {
+       return (
+         <div className="p-4 sm:p-6 lg:p-8">
+           <HistoryGrid history={viewingHistory} onSelectVideo={handleSelectVideo} onClearHistory={handleClearHistory} />
+           {viewingHistory.length === 0 && (
+             <div className="flex flex-col items-center justify-center h-64 text-center text-text-secondary p-4 bg-surface rounded-lg">
+                <SearchIcon className="w-24 h-24 mb-4 text-secondary" />
+                <h2 className="text-2xl font-bold">欢迎使用 CMS 播放器</h2>
+                <p className="mt-2 max-w-md">您的观看记录会显示在这里。请使用上方的搜索框开始查找视频。</p>
+             </div>
+           )}
+         </div>
+       );
     }
-    
-    const MainContent = () => {
+
+    if (currentView === 'search') {
+      const SearchContent = () => {
         if (isLoading) {
-        return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div></div>;
+          return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div></div>;
         }
         if (error) {
-        return <div className="flex flex-col items-center justify-center h-auto my-8 text-center text-red-500 p-4 bg-red-50 rounded-lg">
-            <h2 className="text-xl font-semibold">加载出错</h2>
-            <pre className="text-left text-sm whitespace-pre-wrap mt-2 font-sans">{error}</pre>
-            </div>;
-        }
-        if (!searchQuery.trim() && videos.length === 0 && !isLoading) {
-             return (
-                <div className="flex flex-col items-center justify-center h-64 text-center text-text-secondary p-4 bg-surface rounded-lg">
-                    <SearchIcon className="w-24 h-24 mb-4 text-secondary" />
-                    <h2 className="text-2xl font-bold">欢迎使用</h2>
-                    <p className="mt-2 max-w-md">使用上方搜索框搜索，或通过底部导航栏按分类浏览。</p>
-                </div>
-            );
+          return <div className="flex flex-col items-center justify-center h-auto my-8 text-center text-red-500 p-4 bg-red-50 rounded-lg">
+              <h2 className="text-xl font-semibold">加载出错</h2>
+              <pre className="text-left text-sm whitespace-pre-wrap mt-2 font-sans">{error}</pre>
+              </div>;
         }
         if (videos.length > 0) {
-            const grouped = groupVideosBySource(videos);
-            if (activeCategory && Object.keys(grouped).length === 1 && !searchQuery) {
-                return <VideoGrid groupedVideos={{ [activeCategory]: videos }} onSelectVideo={handleSelectVideo} />;
-            }
-            return <VideoGrid groupedVideos={grouped} onSelectVideo={handleSelectVideo} />;
+            return <VideoGrid groupedVideos={groupedVideos} onSelectVideo={handleSelectVideo} />;
         }
         if (!isLoading) {
-        return <div className="flex flex-col items-center justify-center h-64 text-center text-text-secondary p-4 bg-surface rounded-lg">
-            <h2 className="text-xl font-semibold">未找到结果</h2>
-            <p>"{searchQuery || activeCategory}" 没有返回任何结果。</p>
-            </div>;
+            const message = searchQuery 
+            ? `"${searchQuery}" 没有返回任何结果。`
+            : "开始在上方搜索框中输入内容以查找视频。";
+          const title = searchQuery ? "未找到结果" : "搜索视频";
+           return (
+            <div className="flex flex-col items-center justify-center h-64 text-center text-text-secondary p-4 bg-surface rounded-lg">
+                <SearchIcon className="w-24 h-24 mb-4 text-secondary" />
+                <h2 className="text-xl font-semibold">{title}</h2>
+                <p>{message}</p>
+            </div>
+           );
         }
         return null;
+      };
+      return <div className="p-4 sm:p-6 lg:p-8"><SearchContent /></div>;
     }
     
-    return <div className="p-4 sm:p-6 lg:p-8"><MainContent/></div>;
-  };
+    return null;
+  }
 
   return (
-    <div className="min-h-screen font-sans pb-16 md:pb-0">
-      <SourceManager 
-        sources={sources}
-        players={defaultPlayers}
-        selectedPlayerId={selectedPlayerId}
-        predefinedSources={predefinedSourcesList}
-        corsProxyUrl={corsProxyUrl}
-        onAddSource={handleAddSource}
-        onDeleteSource={handleDeleteSource}
-        onSearch={handleSearch}
-        onPlayerChange={setSelectedPlayerId}
-        onTestSource={testSingleSource}
-        onTestAllSources={testAllSources}
-        onCorsProxyUrlChange={setCorsProxyUrl}
-      />
-      <main>
-        {renderContent()}
-      </main>
-      <BottomNavBar activeCategory={activeCategory} onSelectCategory={handleCategorySelect} />
+    <div className="min-h-screen font-sans">
+      {selectedVideo ? (
+        <VideoPlayer 
+          key={`${selectedVideo.sourceId}-${selectedVideo.id}`}
+          video={selectedVideo} 
+          player={selectedPlayer}
+          onBack={handleBackToGrid}
+          relatedVideos={relatedVideos}
+          alternativeVideos={alternativeVideos}
+          onSelectVideo={handleSelectVideo}
+          onEpisodePlay={handleEpisodePlay}
+        />
+      ) : (
+        <>
+          <SourceManager 
+            sources={sources}
+            players={defaultPlayers}
+            selectedPlayerId={selectedPlayerId}
+            predefinedSources={predefinedSourcesList}
+            corsProxyUrl={corsProxyUrl}
+            onAddSource={handleAddSource}
+            onDeleteSource={handleDeleteSource}
+            onSearch={handleSearch}
+            onPlayerChange={setSelectedPlayerId}
+            onTestSource={testSingleSource}
+            onTestAllSources={testAllSources}
+            onCorsProxyUrlChange={setCorsProxyUrl}
+            onGoHome={handleGoHome}
+          />
+          <main>
+            <div className="animate-fadeInPage">
+              {renderHomeAndSearch()}
+            </div>
+          </main>
+        </>
+      )}
     </div>
   );
 };

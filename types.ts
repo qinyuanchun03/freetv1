@@ -30,3 +30,9 @@ export interface Player {
   type: 'dplayer' | 'iframe';
   url?: string; // Only for iframe type
 }
+
+export interface HistoryEntry {
+  video: Video;
+  episodeName: string;
+  lastWatched: number;
+}

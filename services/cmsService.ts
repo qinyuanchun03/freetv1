@@ -48,21 +48,28 @@ const setCache = (key: string, data: any) => {
     }
 };
 
-const fetchWithProxy = async (url: string): Promise<Response> => {
-    const targetUrl = proxyConfig.encode ? encodeURIComponent(url) : url;
-    const proxyUrl = `${proxyConfig.prefix}${targetUrl}`;
+export const fetchService = async (url: string, useProxy: boolean): Promise<Response> => {
+    let finalUrl: string;
+    let context: string;
+
+    if (useProxy) {
+        finalUrl = `${proxyConfig.prefix}${encodeURIComponent(url)}`;
+        context = `(via proxy: ${proxyConfig.prefix.split('?')[0]})`;
+    } else {
+        finalUrl = url;
+        context = '(direct)';
+    }
 
     try {
-        const response = await fetch(proxyUrl);
+        const response = await fetch(finalUrl);
         if (!response.ok) {
-            throw new Error(`代理响应错误: ${response.status} ${response.statusText}`);
+            throw new Error(`HTTP 错误: ${response.status} ${response.statusText}`);
         }
         return response;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '未知网络错误';
-        console.error(`代理请求失败，URL: ${url}`, errorMessage);
-        // 向上抛出错误，由调用方添加更多上下文信息
-        throw new Error(`代理请求失败: ${errorMessage}`);
+        const errorMessage = error instanceof Error ? error.message : '未知 fetch 错误';
+        console.error(`fetchService failed for "${url}" ${context}:`, error);
+        throw new Error(`请求资源失败: ${errorMessage}`);
     }
 };
 
@@ -143,7 +150,7 @@ const fetchVideosFromM3U8 = async (source: Source, query?: string): Promise<Vide
     }
 
     try {
-        const response = await fetchWithProxy(source.url);
+        const response = await fetchService(source.url, true);
         if (!response.ok) {
             throw new Error(`网络响应错误: ${response.status}`);
         }
@@ -176,7 +183,7 @@ const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryI
     }
   
     try {
-      const response = await fetchWithProxy(apiUrl.toString());
+      const response = await fetchService(apiUrl.toString(), true);
   
       if (!response.ok) {
         throw new Error(`网络响应错误: ${response.status} ${response.statusText}`);
@@ -189,7 +196,6 @@ const fetchVideosFromAppleCMS = async (source: Source, query?: string, categoryI
         data = JSON.parse(responseText);
       } catch (parseError) {
         if (query && (responseText.includes('暂不支持搜索') || responseText.includes('禁止搜索'))) {
-          console.warn(`源 ${source.name} 不支持搜索，返回空结果。`);
           return [];
         }
         if (responseText.trim().startsWith('<')) {

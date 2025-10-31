@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Video, Episode, Player } from '../types';
-import { BackIcon } from './icons';
+import { BackIcon, SortIcon } from './icons';
 
 declare var DPlayer: any;
 
@@ -11,37 +11,35 @@ interface VideoPlayerProps {
   alternativeVideos: Video[];
   onBack: () => void;
   onSelectVideo: (video: Video) => void;
+  onEpisodePlay: (video: Video, episode: Episode) => void;
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, player, relatedVideos, alternativeVideos, onBack, onSelectVideo }) => {
+const EPISODE_GROUP_SIZE = 25;
+
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, player, relatedVideos, alternativeVideos, onBack, onSelectVideo, onEpisodePlay }) => {
   const dplayerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
   const [currentEpisode, setCurrentEpisode] = useState<Episode | null>(null);
   const [activeTab, setActiveTab] = useState<'episodes' | 'sources'>('episodes');
-  // 重构：从存储索引改为存储剧集名称，这更加健壮。
-  const targetEpisodeNameRef = useRef<string | null>(null);
+  const [isReversed, setIsReversed] = useState(false);
+  const [episodeGroupIndex, setEpisodeGroupIndex] = useState(0);
 
   useEffect(() => {
-    // 优先处理来自源切换的特定剧集请求
-    if (targetEpisodeNameRef.current) {
-        // 在新视频的剧集列表中按名称查找
-        const targetEpisode = video.episodes.find(ep => ep.name === targetEpisodeNameRef.current);
-        targetEpisodeNameRef.current = null; // 使用后立即重置
-        if (targetEpisode) {
-            setCurrentEpisode(targetEpisode);
-            return; // 找到目标，提前退出
-        }
-    }
-
-    // 默认行为：如果没有特定目标或找不到目标，则播放第一个剧集
     if (video.episodes && video.episodes.length > 0) {
       setCurrentEpisode(video.episodes[0]);
     } else {
       setCurrentEpisode(null);
     }
-    // 每当主视频更换时，总是切回剧集标签页
     setActiveTab('episodes');
+    setEpisodeGroupIndex(0);
+    setIsReversed(false);
   }, [video]);
+
+  useEffect(() => {
+    if (currentEpisode) {
+      onEpisodePlay(video, currentEpisode);
+    }
+  }, [currentEpisode, video, onEpisodePlay]);
 
   useEffect(() => {
     if (dplayerRef.current) {
@@ -49,17 +47,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, player, related
       dplayerRef.current = null;
     }
     
-    if (player.type === 'dplayer' && currentEpisode && containerRef.current) {
-      const isM3U8 = video.sourceType === 'm3u8' || currentEpisode.url.includes('.m3u8');
-      
-      dplayerRef.current = new DPlayer({
-        container: containerRef.current,
-        video: {
-          url: currentEpisode.url,
-          type: isM3U8 ? 'hls' : 'auto',
-        },
-        autoplay: true,
-      });
+    if (currentEpisode && playerContainerRef.current) {
+      if (player.type === 'dplayer') {
+        const isM3U8 = video.sourceType === 'm3u8' || currentEpisode.url.includes('.m3u8');
+        const dplayerOptions = {
+          container: playerContainerRef.current,
+          video: { url: currentEpisode.url, type: isM3U8 ? 'hls' : 'auto' },
+          autoplay: true,
+        };
+        dplayerRef.current = new DPlayer(dplayerOptions);
+      }
     }
 
     return () => {
@@ -70,173 +67,187 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, player, related
     };
   }, [currentEpisode, player, video.sourceType]);
 
-  const allSourcesForCurrentVideo = [video, ...alternativeVideos].sort((a,b) => a.sourceName.localeCompare(b.sourceName));
+  const episodeGroups = useMemo(() => {
+    if (!video.episodes || video.episodes.length === 0) return [];
+    
+    const sortedEpisodes = [...video.episodes];
+    if (isReversed) {
+      sortedEpisodes.reverse();
+    }
+    
+    const groups = [];
+    for (let i = 0; i < sortedEpisodes.length; i += EPISODE_GROUP_SIZE) {
+      groups.push(sortedEpisodes.slice(i, i + EPISODE_GROUP_SIZE));
+    }
+    return groups;
+  }, [video.episodes, isReversed]);
 
-  const handleSourceSwitch = (newSourceVideo: Video) => {
-      // 记住当前播放剧集的 *名称*，而不是它的位置。
-      const currentEpisodeName = currentEpisode?.name;
-      if (currentEpisodeName) {
-        targetEpisodeNameRef.current = currentEpisodeName;
+  const allSourcesForCurrentVideo = useMemo(() => {
+    const sourceMap = new Map<string, Video>();
+    [video, ...alternativeVideos].forEach(v => {
+      if (!sourceMap.has(v.sourceId)) {
+        sourceMap.set(v.sourceId, v);
       }
-      
-      // 触发视频选择流程以切换到新源。
-      // 后续的useEffect将使用ref中存储的名称来设置正确的剧集。
-      onSelectVideo(newSourceVideo);
-  };
+    });
+    return Array.from(sourceMap.values()).sort((a, b) => a.sourceName.localeCompare(b.sourceName, 'zh-Hans'));
+  }, [video, alternativeVideos]);
+
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
-      <div className="mb-6">
-        <button
-          onClick={onBack}
-          className="flex items-center space-x-2 text-text-secondary hover:text-text-primary transition-colors font-medium"
-        >
-          <BackIcon className="w-5 h-5" />
-          <span>返回列表</span>
-        </button>
-      </div>
+    <div className="animate-fadeInPage">
+      <header className="bg-surface/95 backdrop-blur-sm shadow-sm sticky top-0 z-30">
+        <div className="p-4 flex items-center gap-4 max-w-screen-2xl mx-auto">
+          <button onClick={onBack} className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors">
+            <BackIcon className="w-6 h-6" />
+          </button>
+          <div className="flex items-center text-sm text-text-secondary truncate">
+            <h1 className="font-semibold text-text-primary text-base truncate">{video.title}</h1>
+            {currentEpisode && (
+              <>
+                <span className="mx-2 text-gray-300">/</span>
+                <span className="truncate">{currentEpisode.name}</span>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
 
-      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
-        {/* Left Column: Player */}
-        <div className="w-full lg:w-2/3 xl:w-3/4 flex-shrink-0">
-          <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl">
-            {player.type === 'dplayer' && <div ref={containerRef} className="w-full h-full" />}
-            {player.type === 'iframe' && currentEpisode && player.url && (
+      <main className="p-4 sm:p-6 lg:p-8 max-w-screen-2xl mx-auto">
+        <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
+          <div className="w-full lg:flex-1">
+            <div className="w-full aspect-video bg-black rounded-xl overflow-hidden shadow-2xl">
+              {player.type === 'dplayer' && <div ref={playerContainerRef} className="w-full h-full" />}
+              {player.type === 'iframe' && currentEpisode && player.url && (
                 <iframe
-                    src={`${player.url}${encodeURIComponent(currentEpisode.url)}`}
-                    className="w-full h-full"
-                    frameBorder="0"
-                    scrolling="no"
-                    allowFullScreen={true}
-                    title={currentEpisode.name}
+                  src={`${player.url}${encodeURIComponent(currentEpisode.url)}`}
+                  className="w-full h-full"
+                  frameBorder="0"
+                  scrolling="no"
+                  allowFullScreen={true}
+                  title={currentEpisode.name}
                 />
-            )}
-            {(player.type === 'iframe' && (!currentEpisode || !player.url)) && (
-                <div className="w-full h-full flex items-center justify-center text-white">
-                    <p>无法加载视频。</p>
-                </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Right Column: Details, Episodes, Sources */}
-        <div className="w-full lg:w-1/3 xl:w-1/4">
-          <div className="bg-surface rounded-lg shadow-lg h-full flex flex-col">
-              <div className="p-4 border-b border-border-color">
-                <h1 className="text-2xl font-bold text-text-primary leading-tight">{video.title}</h1>
-                <p className="mt-2 text-sm text-text-secondary line-clamp-3">{video.description}</p>
-              </div>
-
-              {/* Tabs */}
+          <div className="w-full lg:w-[400px] flex-shrink-0">
+            <div className="bg-surface/95 rounded-2xl shadow-2xl h-full flex flex-col">
               <div className="flex border-b border-border-color" role="tablist">
-                  <button
-                      onClick={() => setActiveTab('episodes')}
-                      role="tab"
-                      aria-selected={activeTab === 'episodes'}
-                      className={`flex-1 py-3 text-sm font-semibold text-center transition-colors focus:outline-none ${
-                          activeTab === 'episodes'
-                              ? 'text-primary border-b-2 border-primary'
-                              : 'text-text-secondary hover:bg-background'
-                      }`}
-                  >
-                      剧集
-                  </button>
-                  <button
-                      onClick={() => setActiveTab('sources')}
-                      role="tab"
-                      aria-selected={activeTab === 'sources'}
-                      className={`flex-1 py-3 text-sm font-semibold text-center transition-colors focus:outline-none ${
-                          activeTab === 'sources'
-                              ? 'text-primary border-b-2 border-primary'
-                              : 'text-text-secondary hover:bg-background'
-                      }`}
-                  >
-                      播放源 ({allSourcesForCurrentVideo.length})
-                  </button>
+                <button
+                  onClick={() => setActiveTab('episodes')}
+                  role="tab"
+                  aria-selected={activeTab === 'episodes'}
+                  className={`flex-1 py-3 text-sm font-semibold text-center transition-colors focus:outline-none ${activeTab === 'episodes' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:bg-background'}`}
+                >
+                  选集
+                </button>
+                <button
+                  onClick={() => setActiveTab('sources')}
+                  role="tab"
+                  aria-selected={activeTab === 'sources'}
+                  className={`flex-1 py-3 text-sm font-semibold text-center transition-colors focus:outline-none ${activeTab === 'sources' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:bg-background'}`}
+                >
+                  换源 ({allSourcesForCurrentVideo.length})
+                </button>
               </div>
 
-              {/* Tab Panels */}
-              <div className="flex-grow overflow-y-auto p-4">
-                  {/* Episodes Panel */}
-                  <div role="tabpanel" hidden={activeTab !== 'episodes'}>
-                      {video.episodes && video.episodes.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                              {video.episodes.map((episode) => (
-                                  <button
-                                      key={`${video.id}-${episode.name}`}
-                                      onClick={() => setCurrentEpisode(episode)}
-                                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors w-full sm:w-auto text-left ${
-                                          currentEpisode?.url === episode.url
-                                              ? 'bg-primary text-white'
-                                              : 'bg-background hover:bg-border-color'
-                                      }`}
-                                  >
-                                      {episode.name}
-                                  </button>
-                              ))}
-                          </div>
-                      ) : (
-                          <p className="text-text-secondary text-sm text-center py-4">暂无剧集信息。</p>
-                      )}
-                  </div>
-                  
-                  {/* Sources Panel */}
-                  <div role="tabpanel" hidden={activeTab !== 'sources'}>
-                      <ul className="space-y-2">
-                          {allSourcesForCurrentVideo.map((sourceVideo) => (
-                              <li key={sourceVideo.sourceId}>
-                                  <button
-                                      onClick={() => handleSourceSwitch(sourceVideo)}
-                                      disabled={sourceVideo.sourceId === video.sourceId}
-                                      className={`w-full text-left px-4 py-3 rounded-md transition-colors ${
-                                          sourceVideo.sourceId === video.sourceId
-                                              ? 'bg-primary text-white cursor-default'
-                                              : 'bg-background hover:bg-border-color text-text-primary'
-                                      }`}
-                                  >
-                                      <span className="font-semibold">{sourceVideo.sourceName}</span>
-                                  </button>
-                              </li>
-                          ))}
-                      </ul>
-                  </div>
-              </div>
-          </div>
-        </div>
-      </div>
-      
-      {/* Related Videos Section */}
-      {relatedVideos.length > 0 && (
-          <div className="mt-8 lg:mt-12">
-              <h2 className="text-2xl font-bold text-text-primary mb-4">相关推荐</h2>
-               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-                    {relatedVideos.map((relatedVideo) => (
-                        <div
-                        key={`${relatedVideo.sourceId}-${relatedVideo.id}`}
-                        onClick={() => onSelectVideo(relatedVideo)}
-                        className="group cursor-pointer"
-                        >
-                            <div className="relative aspect-[2/3] bg-surface rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
-                                <img
-                                src={relatedVideo.thumbnailUrl}
-                                alt={relatedVideo.title}
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                                />
-                                {relatedVideo.remarks && (
-                                    <div className="absolute top-2 right-2 bg-primary text-white text-xs font-bold px-2 py-1 rounded-md">
-                                        {relatedVideo.remarks}
-                                    </div>
-                                )}
+              <div className="flex-grow overflow-y-auto max-h-[60vh] lg:max-h-none">
+                {activeTab === 'episodes' && (
+                  <div role="tabpanel" className="animate-fadeInPage">
+                    {episodeGroups.length > 0 ? (
+                      <>
+                        <div className="p-2 border-b border-border-color flex items-center justify-between flex-wrap gap-y-2">
+                            <div className="flex items-center flex-wrap gap-2">
+                            {episodeGroups.length > 1 && episodeGroups.map((_, index) => {
+                                const start = index * EPISODE_GROUP_SIZE + 1;
+                                const end = start + episodeGroups[index].length - 1;
+                                return (
+                                <button key={index} onClick={() => setEpisodeGroupIndex(index)} className={`px-2 py-1 text-xs font-semibold rounded ${episodeGroupIndex === index ? 'bg-primary text-white' : 'bg-background hover:bg-border-color'}`}>
+                                    {`${start}-${end}`}
+                                </button>
+                                );
+                            })}
                             </div>
-                            <div className="pt-2">
-                                <h3 className="font-semibold text-sm truncate text-text-primary">{relatedVideo.title}</h3>
+                            <button onClick={() => setIsReversed(prev => !prev)} className="p-1 text-text-secondary hover:text-primary rounded-full hover:bg-background transition-colors" title={isReversed ? "降序" : "升序"}>
+                              <SortIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            <div className="grid grid-cols-[repeat(auto-fill,minmax(50px,1fr))] gap-2">
+                            {episodeGroups[episodeGroupIndex]?.map(episode => (
+                                <button key={`${video.id}-${episode.name}`} onClick={() => setCurrentEpisode(episode)} className={`p-2 text-sm font-medium rounded-md transition-all duration-200 aspect-square flex items-center justify-center truncate hover:scale-110 ${currentEpisode?.url === episode.url ? 'bg-primary text-white scale-110' : 'bg-background hover:bg-border-color text-text-primary'}`}>
+                                {episode.name}
+                                </button>
+                            ))}
                             </div>
                         </div>
-                    ))}
+                      </>
+                    ) : (
+                      <p className="text-text-secondary text-sm text-center py-8">暂无剧集信息。</p>
+                    )}
+                  </div>
+                )}
+                {activeTab === 'sources' && (
+                  <div role="tabpanel" className="animate-fadeInPage p-4">
+                    <ul className="space-y-2">
+                      {allSourcesForCurrentVideo.map((sourceVideo) => (
+                        <li key={sourceVideo.sourceId}>
+                          <button onClick={() => onSelectVideo(sourceVideo)} disabled={sourceVideo.sourceId === video.sourceId} className={`w-full text-left px-4 py-3 rounded-md transition-colors ${sourceVideo.sourceId === video.sourceId ? 'bg-primary text-white cursor-default' : 'bg-background hover:bg-border-color text-text-primary'}`}>
+                            <span className="font-semibold">{sourceVideo.sourceName}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-8 lg:mt-12 bg-surface/95 rounded-2xl shadow-2xl p-6 flex flex-col md:flex-row gap-6">
+          <div className="w-full md:w-48 lg:w-56 flex-shrink-0">
+            <img src={video.thumbnailUrl} alt={video.title} className="w-full aspect-[2/3] object-cover rounded-xl" />
+          </div>
+          <div className="flex-1">
+            <h1 className="text-3xl font-bold text-text-primary">{video.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-3">
+              {video.remarks && (
+                <span className="bg-primary/10 text-primary text-xs font-bold px-2 py-1 rounded">
+                  {video.remarks}
+                </span>
+              )}
+              <span className="bg-secondary/10 text-text-secondary text-xs font-bold px-2 py-1 rounded">
+                {video.sourceName}
+              </span>
+            </div>
+            <p className="mt-4 text-text-secondary leading-relaxed">{video.description}</p>
+          </div>
+        </div>
+
+        {relatedVideos.length > 0 && (
+          <div className="mt-8 lg:mt-12">
+            <h2 className="text-2xl font-bold text-text-primary mb-4">相关推荐</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+              {relatedVideos.map((relatedVideo) => (
+                <div key={`${relatedVideo.sourceId}-${relatedVideo.id}`} onClick={() => onSelectVideo(relatedVideo)} className="group cursor-pointer transition-transform duration-300 hover:-translate-y-1 hover:scale-[1.03]">
+                  <div className="relative aspect-[2/3] bg-surface rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300">
+                    <img src={relatedVideo.thumbnailUrl} alt={relatedVideo.title} className="w-full h-full object-cover" loading="lazy" />
+                    {relatedVideo.remarks && (
+                      <div className="absolute top-2 right-2 bg-primary text-white text-xs font-bold px-2 py-1 rounded-md">
+                        {relatedVideo.remarks}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pt-2">
+                    <h3 className="font-semibold text-sm truncate text-text-primary">{relatedVideo.title}</h3>
+                  </div>
                 </div>
+              ))}
+            </div>
           </div>
         )}
+      </main>
     </div>
   );
 };

@@ -16,6 +16,7 @@ interface SourceManagerProps {
   onTestSource: (id: string) => void;
   onTestAllSources: () => void;
   onCorsProxyUrlChange: (url: string) => void;
+  onGoHome: () => void;
 }
 
 const SettingsModal: React.FC<{
@@ -62,8 +63,8 @@ const SettingsModal: React.FC<{
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" onClick={onClose}>
-            <div className="bg-surface rounded-lg p-6 w-full max-w-2xl shadow-xl flex flex-col h-[85vh] sm:h-[75vh]" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn" onClick={onClose}>
+            <div className="bg-surface/95 rounded-2xl p-6 w-full max-w-2xl shadow-xl flex flex-col h-[85vh] sm:h-[75vh] animate-scaleIn" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-4 pb-4 border-b border-border-color">
                     <h2 className="text-2xl font-bold text-text-primary">设置</h2>
                     <button onClick={onClose} className="text-text-secondary hover:text-text-primary">
@@ -82,7 +83,7 @@ const SettingsModal: React.FC<{
                     {sources.length > 0 ? (
                       <ul className="space-y-2">
                           {sources.map(source => (
-                          <li key={source.id} className="flex items-center justify-between bg-background p-3 rounded-md">
+                          <li key={source.id} className="flex items-center justify-between bg-background p-3 rounded-lg transition-all duration-300 hover:shadow-md">
                               <div className="flex-1 overflow-hidden">
                                 <div className="flex items-center space-x-2">
                                     <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusClasses[source.status || 'unknown']}`}></span>
@@ -217,6 +218,7 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
   onTestSource,
   onTestAllSources,
   onCorsProxyUrlChange,
+  onGoHome,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -244,10 +246,10 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
         onCorsProxyUrlChange={onCorsProxyUrlChange}
       />}
       <div className="container mx-auto flex items-center justify-between gap-4">
-        <div className="flex items-center space-x-2">
-          <TvIcon className="w-8 h-8 text-primary" />
+        <button onClick={onGoHome} className="flex items-center space-x-2 cursor-pointer group">
+          <TvIcon className="w-8 h-8 text-primary group-hover:scale-110 transition-transform" />
           <h1 className="text-xl font-bold text-text-primary hidden sm:block">CMS 播放器</h1>
-        </div>
+        </button>
         
         <div className="flex-1 max-w-xl flex items-center">
           <input

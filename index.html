@@ -12,14 +12,33 @@
         theme: {
           extend: {
             colors: {
-              'background': '#f7fafc', // A very light gray, almost white
+              'background': '#f1f5f9', // slate-100, a cooler light gray
               'surface': '#ffffff',
               'primary': '#22c55e', // A vibrant green
               'primary-hover': '#16a34a',
               'secondary': '#94a3b8',
               'text-primary': '#1e293b',
               'text-secondary': '#64748b',
-              'border-color': '#e2e8f0',
+              'border-color': '#e2e8f0', // slate-200
+            },
+            animation: {
+              fadeIn: 'fadeIn 0.3s ease-in-out forwards',
+              scaleIn: 'scaleIn 0.3s ease-in-out forwards',
+              fadeInPage: 'fadeInPage 0.5s ease-in-out forwards'
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: 0 },
+                '100%': { opacity: 1 },
+              },
+              scaleIn: {
+                '0%': { opacity: 0, transform: 'scale(0.95) translateY(10px)' },
+                '100%': { opacity: 1, transform: 'scale(1) translateY(0)' },
+              },
+              fadeInPage: {
+                '0%': { opacity: 0 },
+                '100%': { opacity: 1 },
+              }
             },
           },
         },

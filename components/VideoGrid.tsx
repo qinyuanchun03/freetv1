@@ -19,9 +19,9 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ groupedVideos, onSelectVid
               <div
                 key={`${video.sourceId}-${video.id}`}
                 onClick={() => onSelectVideo(video)}
-                className="group cursor-pointer"
+                className="group cursor-pointer transition-transform duration-300 hover:-translate-y-1 hover:scale-[1.03]"
               >
-                <div className="relative aspect-[2/3] bg-surface rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
+                <div className="relative aspect-[2/3] bg-surface rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300">
                   <img
                     src={video.thumbnailUrl}
                     alt={video.title}
