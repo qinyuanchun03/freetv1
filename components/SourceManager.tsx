@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import type { Source, Player } from '../types';
 import { 
@@ -512,7 +513,7 @@ export const SourceManager: React.FC<SourceManagerProps> = ({
             <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-green-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/30 transition-transform group-hover:scale-105 group-active:scale-95 ring-2 ring-transparent group-hover:ring-primary/20">
               <TvIcon className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <h1 className="text-lg sm:text-xl font-extrabold text-text-primary hidden sm:block tracking-tight">CMS <span className="text-primary">Player</span></h1>
+            <h1 className="text-lg sm:text-xl font-extrabold text-text-primary hidden sm:block tracking-tight">JiangHu<span className="text-primary">在线影视</span></h1>
           </button>
           
           <div className="flex-1 max-w-lg relative group z-10">

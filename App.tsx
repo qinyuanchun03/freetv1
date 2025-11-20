@@ -1,11 +1,14 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Source, Video, Player, HistoryEntry, Episode } from './types';
 import { SourceManager } from './components/SourceManager';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoPlayer } from './components/VideoPlayer';
 import { HistoryGrid } from './components/HistoryGrid';
+import { StartupNotice } from './components/StartupNotice';
 import { fetchVideos, setProxyUrl } from './services/cmsService';
 import { SearchIcon } from './components/icons';
+import { appConfig } from './config';
 
 // 一个经过大幅扩充和精心策划的预定义源列表。
 // 移除了重复项，并清理了名称以提供更好的用户体验。
@@ -80,6 +83,10 @@ const App: React.FC = () => {
     return savedHistory ? JSON.parse(savedHistory) : [];
   });
 
+  // Set document title from config
+  useEffect(() => {
+    document.title = appConfig.siteTitle;
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('cms-player-sources', JSON.stringify(sources));
@@ -365,7 +372,7 @@ const App: React.FC = () => {
            {viewingHistory.length === 0 && (
              <div className="flex flex-col items-center justify-center h-64 text-center text-text-secondary p-4 bg-surface rounded-lg">
                 <SearchIcon className="w-24 h-24 mb-4 text-secondary" />
-                <h2 className="text-2xl font-bold">欢迎使用 CMS 播放器</h2>
+                <h2 className="text-2xl font-bold">欢迎使用 {appConfig.siteTitle}</h2>
                 <p className="mt-2 max-w-md">您的观看记录会显示在这里。请使用上方的搜索框开始查找视频。</p>
              </div>
            )}
@@ -410,6 +417,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen font-sans">
+      <StartupNotice />
       {selectedVideo ? (
         <VideoPlayer 
           key={`${selectedVideo.sourceId}-${selectedVideo.id}`}
